@@ -118,16 +118,14 @@ def bpe_tokenization(
     
     # Merge iteratively to create BPE merges
     merges = []
-    while len(vocab) < vocab_size:
-        pair_cnts = defaultdict(int)
-        for pre_token, cnt in pre_token_cnts.items():
-            for i in range(len(pre_token) - 1):
-                pair = (pre_token[i], pre_token[i+1])
-                pair_cnts[pair] += cnt
-        
-        if not pair_cnts:
-            break
-        
+
+    pair_cnts = defaultdict(int)
+    for pre_token, cnt in pre_token_cnts.items():
+        for i in range(len(pre_token) - 1):
+            pair = (pre_token[i], pre_token[i+1])
+            pair_cnts[pair] += cnt
+
+    while len(vocab) < vocab_size:        
         top_pair = max(pair_cnts, key=lambda k: (pair_cnts[k], k))
         
         merges.append(top_pair)
@@ -135,24 +133,47 @@ def bpe_tokenization(
         vocab[token_id] = new_token
         token_id += 1
         
-        # Update pre_token_cnts with new merged token
+        # Update pre_token_cnts and pair_cnts with new merged token
+        affected_pairs = set()
+        new_pair_cnts = defaultdict(int)
         updated_pre_token_cnts = []
         for pre_token, cnt in pre_token_cnts.items():
             indices = [i for i in range(len(pre_token) - 1) if pre_token[i:i + 2] == top_pair]
-            if indices:
-                new_pre_token = []
-                i = 0
-                while i < len(pre_token):
-                    if i in indices:
-                        new_pre_token.append(new_token)
-                        i += 2
-                    else:
-                        new_pre_token.append(pre_token[i])
-                        i += 1
-                updated_pre_token_cnts.append((pre_token, tuple(new_pre_token), cnt))
+            if not indices:
+                continue
+            # update pre_token_cnts
+            new_pre_token = []
+            i = 0
+            while i < len(pre_token):
+                if i in indices:
+                    new_pre_token.append(new_token)
+                    i += 2
+                else:
+                    new_pre_token.append(pre_token[i])
+                    i += 1
+            updated_pre_token_cnts.append((pre_token, tuple(new_pre_token), cnt))
 
+            # update pair_cnts
+            for i in range(len(pre_token) - 1):
+                old_pair = (pre_token[i], pre_token[i + 1])
+                affected_pairs.add(old_pair)
+                pair_cnts[old_pair] -= cnt
+            
+            for i in range(len(new_pre_token) - 1):
+                new_pair = (new_pre_token[i], new_pre_token[i+1])
+                new_pair_cnts[new_pair] += cnt
+
+        # update affected pre_token_cnts only
         for pre_token, new_pre_token, cnt in updated_pre_token_cnts:
             if pre_token != new_pre_token:
                 pre_token_cnts[new_pre_token] = pre_token_cnts.get(new_pre_token, 0) + cnt
                 del pre_token_cnts[pre_token]
+        
+        # update affected pair_cnts only
+        for old_pair in affected_pairs:
+            if pair_cnts[old_pair] <= 0:
+                del pair_cnts[old_pair]
+        for pair, cnt in new_pair_cnts.items():
+            pair_cnts[pair] += cnt
+
     return vocab, merges

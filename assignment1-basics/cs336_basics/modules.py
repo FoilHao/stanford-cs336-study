@@ -74,8 +74,8 @@ class RMSNorm(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(torch.float32)
-        rms = torch.sqrt(x.pow(2).mean(-1, keepdim=True))
-        norm_x = x / (rms + self.eps) * self.gain
+        rms = torch.sqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        norm_x = x / rms * self.gain
         return norm_x.to(self.dtype)
 
 class RotaryPosisionalEmbedding(nn.Module):
@@ -93,14 +93,17 @@ class RotaryPosisionalEmbedding(nn.Module):
         self.device = device
 
         # caculate and cache cos/sin theta
-        i = torch.arange(max_seq_len)
-        k = torch.arange(self.d_k // 2)
+        i = torch.arange(max_seq_len).float()
+        k = torch.arange(self.d_k // 2).float()
         theta_k = self.theta ** (2 * k / self.d_k)
         freqs = i.unsqueeze(1) / theta_k
         self.register_buffer('cos', torch.cos(freqs))
         self.register_buffer('sin', torch.sin(freqs))
                                                 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        seq_len = x.shape[-2]
+        if token_positions is None:
+            token_positions = torch.arange(seq_len, device=x.device)
         cos = self.cos[token_positions]
         sin = self.sin[token_positions]
         x_even = x[..., ::2]

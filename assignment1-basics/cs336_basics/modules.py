@@ -57,3 +57,60 @@ class Embedding(nn.Module):
                 embeddings[i][j] = self.weight[token_id]
         return embeddings
 
+class RMSNorm(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
+    ):
+        super(RMSNorm, self).__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.device = device
+        self.dtype = dtype
+        self.gain = nn.Parameter(torch.ones(d_model))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.to(torch.float32)
+        rms = torch.sqrt(x.pow(2).mean(-1, keepdim=True))
+        norm_x = x / (rms + self.eps) * self.gain
+        return norm_x.to(self.dtype)
+
+class RotaryPosisionalEmbedding(nn.Module):
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None
+    ):
+        super(RotaryPosisionalEmbedding, self).__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+        self.device = device
+
+        # caculate and cache cos/sin theta
+        i = torch.arange(max_seq_len)
+        k = torch.arange(self.d_k // 2)
+        theta_k = self.theta ** (2 * k / self.d_k)
+        freqs = i.unsqueeze(1) / theta_k
+        self.register_buffer('cos', torch.cos(freqs))
+        self.register_buffer('sin', torch.sin(freqs))
+                                                
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        cos = self.cos[token_positions]
+        sin = self.sin[token_positions]
+        x_even = x[..., ::2]
+        x_odd = x[..., 1::2]
+
+        rope_even = x_even * cos - x_odd * sin
+        rope_odd = x_odd * cos + x_even * sin
+
+        rope = torch.zeros_like(x)
+        rope[..., ::2] = rope_even
+        rope[..., 1::2] = rope_odd
+
+        return rope
